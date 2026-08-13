@@ -2,6 +2,7 @@
 set -eu
 
 if [ "$(id -u)" -eq 0 ]; then
+  echo "entrypoint: fixing ownership of /pocketbase to ${PUID:-1000}:${PGID:-1000}"
   chown -R "${PUID:-1000}:${PGID:-1000}" /pocketbase
   exec su-exec "${PUID:-1000}:${PGID:-1000}" "$0" "$@"
 fi
