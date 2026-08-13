@@ -1,4 +1,4 @@
 **
 !.build/pocketbase
-!pb_migrations/
-!pb_migrations/**
+!scripts/migration-worker
+!scripts/entrypoint.sh

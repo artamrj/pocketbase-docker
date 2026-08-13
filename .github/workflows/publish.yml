@@ -1,8 +1,6 @@
 name: Build PocketBase image
 
 on:
-  schedule:
-    - cron: "17 */6 * * *"
   workflow_dispatch:
     inputs:
       pocketbase_version:
@@ -15,8 +13,7 @@ on:
       - .github/workflows/publish.yml
       - Dockerfile
       - .dockerignore
-      - scripts/migration-hash
-      - pb_migrations/**
+      - scripts/**
 
 permissions:
   contents: read
@@ -34,10 +31,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: Check out source and migrations
+      - name: Check out source
         uses: actions/checkout@v6
 
-      - name: Resolve release and image tag
+      - name: Resolve release
         id: identity
         env:
           GH_TOKEN: ${{ github.token }}
@@ -66,39 +63,13 @@ jobs:
           checksums_url=$(jq -r '.assets[] | select(.name == "checksums.txt") | .browser_download_url' <<<"$release")
           [[ -n "$zip_url" && "$zip_url" != null ]]
           [[ -n "$checksums_url" && "$checksums_url" != null ]]
-
-          migrations_sha=$(scripts/migration-hash pb_migrations)
-          tag="${version}-m-${migrations_sha:0:12}"
           {
             echo "version=$version"
             echo "zip_url=$zip_url"
             echo "checksums_url=$checksums_url"
-            echo "migrations_sha=$migrations_sha"
-            echo "tag=$tag"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Authenticate to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
-      - name: Skip an image that already exists
-        id: existing
-        env:
-          TAG: ${{ steps.identity.outputs.tag }}
-        run: |
-          set -euo pipefail
-          if docker manifest inspect "$IMAGE_NAME:$TAG" >/dev/null 2>&1; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Image already exists: $IMAGE_NAME:$TAG"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Download and verify official PocketBase binary
-        if: steps.existing.outputs.skip != 'true'
         env:
           VERSION: ${{ steps.identity.outputs.version }}
           ZIP_URL: ${{ steps.identity.outputs.zip_url }}
@@ -116,84 +87,22 @@ jobs:
           unzip -q ".build/$filename" pocketbase -d .build
           chmod 0755 .build/pocketbase
 
-      - name: Validate migration JavaScript
-        if: steps.existing.outputs.skip != 'true'
-        run: |
-          set -euo pipefail
-          mapfile -d '' files < <(find pb_migrations -maxdepth 1 -type f -name '*.js' -print0 | sort -z)
-          ((${#files[@]} > 0))
-          for file in "${files[@]}"; do node --check "$file"; done
-
-      - name: Apply migrations twice to an empty database
-        if: steps.existing.outputs.skip != 'true'
-        run: |
-          set -euo pipefail
-          data=$(mktemp -d)
-          trap 'rm -rf "$data"' EXIT
-          .build/pocketbase migrate up --dir="$data" --migrationsDir=pb_migrations
-          .build/pocketbase migrate up --dir="$data" --migrationsDir=pb_migrations
+      - name: Authenticate to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Set up Docker Buildx
-        if: steps.existing.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
-      - name: Build final AMD64 image
-        if: steps.existing.outputs.skip != 'true'
+      - name: Build and publish image
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
-          load: true
-          push: false
-          tags: ${{ env.IMAGE_NAME }}:${{ steps.identity.outputs.tag }}
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.identity.outputs.version }}
           build-args: |
             POCKETBASE_VERSION=${{ steps.identity.outputs.version }}
-            MIGRATIONS_SHA256=${{ steps.identity.outputs.migrations_sha }}
-            BUILD_REVISION=${{ github.sha }}
-
-      - name: Require final image health
-        if: steps.existing.outputs.skip != 'true'
-        env:
-          TAG: ${{ steps.identity.outputs.tag }}
-          MIGRATIONS_SHA: ${{ steps.identity.outputs.migrations_sha }}
-        run: |
-          set -euo pipefail
-          test "$(docker image inspect --format '{{.Architecture}}' "$IMAGE_NAME:$TAG")" = amd64
-          test "$(docker image inspect --format '{{index .Config.Labels "io.artamrj.migrations.sha256"}}' "$IMAGE_NAME:$TAG")" = "$MIGRATIONS_SHA"
-          runtime=$(mktemp -d)
-          container=pocketbase-image-test
-          cleanup() {
-            docker rm -f "$container" >/dev/null 2>&1 || true
-            rm -rf "$runtime"
-          }
-          trap cleanup EXIT
-          mkdir -p "$runtime"/{data,hooks,public}
-          sudo chown -R 1000:1000 "$runtime"
-          docker run --detach --name "$container" --platform linux/amd64 \
-            --user 1000:1000 \
-            -v "$runtime/data:/pocketbase/data" \
-            -v "$runtime/hooks:/pocketbase/hooks" \
-            -v "$runtime/public:/pocketbase/public" \
-            "$IMAGE_NAME:$TAG"
-          wait_for_health() {
-            for _ in {1..60}; do
-              state=$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container")
-              if [[ "$state" == "running healthy" ]]; then return 0; fi
-              if [[ "$state" == exited* || "$state" == *unhealthy ]]; then
-                docker logs "$container"
-                return 1
-              fi
-              sleep 2
-            done
-            docker logs "$container"
-            return 1
-          }
-          wait_for_health
-          docker restart "$container" >/dev/null
-          wait_for_health
-
-      - name: Publish immutable AMD64 image
-        if: steps.existing.outputs.skip != 'true'
-        env:
-          TAG: ${{ steps.identity.outputs.tag }}
-        run: docker push "$IMAGE_NAME:$TAG"

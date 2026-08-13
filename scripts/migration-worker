@@ -1,0 +1,82 @@
+#!/bin/sh
+set -eu
+
+root=${POCKETBASE_MIGRATIONS_DIR:-/pocketbase/migrations}
+release=$root/release
+current=$root/current
+repo=${MIGRATIONS_REPOSITORY:-artamrj/pocketbase-migration}
+branch=${MIGRATIONS_BRANCH:-main}
+token_file=${MIGRATIONS_TOKEN_FILE:-/run/secrets/github_token}
+url=${MIGRATIONS_URL:-"https://api.github.com/repos/$repo/tarball/$branch"}
+
+die() {
+  echo "migration-worker: $*" >&2
+  exit 1
+}
+
+require_token() {
+  [ -r "$token_file" ] || die "migration token is missing or unreadable: $token_file"
+  token=$(tr -d '\r\n' < "$token_file")
+  [ -n "$token" ] || die "migration token is empty"
+}
+
+validate_migrations() {
+  directory=$1
+  files=$(find "$directory" -mindepth 1 -maxdepth 1 -type f -print)
+  [ -n "$files" ] || die "no migration files in $directory"
+  nested=$(find "$directory" -mindepth 2 -print -quit)
+  [ -z "$nested" ] || die "unexpected nested entry: $nested"
+  invalid=$(printf '%s\n' "$files" | while IFS= read -r file; do
+    basename "$file" | grep -Eq '^[0-9]{14}_[a-z0-9][a-z0-9_-]*\.js$' || echo "$file"
+  done)
+  [ -z "$invalid" ] || die "invalid migration filenames: $invalid"
+}
+
+sync() {
+  require_token
+  mkdir -p "$root"
+  work=$(mktemp -d "$root/.sync.XXXXXXXX")
+  trap 'rm -rf "$work"' EXIT HUP INT TERM
+  archive=$work/repository.tar.gz
+
+  curl --fail --silent --show-error --location \
+    --proto '=https' --tlsv1.2 \
+    --header "Authorization: Bearer $token" \
+    --header 'Accept: application/vnd.github+json' \
+    --header 'X-GitHub-Api-Version: 2022-11-28' \
+    --output "$archive" "$url" \
+    || die "could not download $repo migrations"
+
+  mkdir "$work/extracted"
+  tar -xzf "$archive" -C "$work/extracted"
+  source_dir=$(find "$work/extracted" -type d -path "*/pb_migrations" -print)
+  source_count=$(printf '%s\n' "$source_dir" | sed '/^$/d' | wc -l | tr -d ' ')
+  [ "$source_count" -eq 1 ] || die "expected one pb_migrations directory, found $source_count"
+  validate_migrations "$source_dir"
+
+  staged="$work/staged"
+  mkdir "$staged"
+  cp -a "$source_dir"/. "$staged"/
+  rm -rf "$release"
+  mv "$staged" "$release"
+  ln -sfn release "$current"
+
+  trap - EXIT HUP INT TERM
+  rm -rf "$work"
+  echo "migrations synced to $current"
+}
+
+status() {
+  if [ -L "$current" ] && [ -d "$release" ]; then
+    echo "current=$release"
+    find "$release" -mindepth 1 -maxdepth 1 -type f | sort | xargs -n1 basename
+  else
+    echo "current=none (run: migration-worker sync)"
+  fi
+}
+
+case "${1:-}" in
+  sync) sync ;;
+  status) status ;;
+  *) echo "usage: migration-worker {sync|status}" >&2; exit 64 ;;
+esac
