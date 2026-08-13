@@ -4,7 +4,7 @@ set -eu
 root=${POCKETBASE_MIGRATIONS_DIR:-/pocketbase/migrations}
 release=$root/release
 current=$root/current
-repo=${MIGRATIONS_REPOSITORY:-artamrj/pocketbase-migration}
+repo=${MIGRATIONS_REPOSITORY:-artamrj/pocketbase-migrations}
 branch=${MIGRATIONS_BRANCH:-main}
 token_file=${MIGRATIONS_TOKEN_FILE:-/run/secrets/github_token}
 url=${MIGRATIONS_URL:-"https://api.github.com/repos/$repo/tarball/$branch"}
@@ -15,17 +15,20 @@ die() {
 }
 
 require_token() {
-  [ -r "$token_file" ] || die "migration token is missing or unreadable: $token_file"
-  token=$(tr -d '\r\n' < "$token_file")
+  token=${MIGRATIONS_TOKEN:-}
+  if [ -z "$token" ]; then
+    [ -r "$token_file" ] || die "migration token is missing (set MIGRATIONS_TOKEN or provide $token_file)"
+    token=$(tr -d '\r\n' < "$token_file")
+  fi
   [ -n "$token" ] || die "migration token is empty"
 }
 
 validate_migrations() {
   directory=$1
-  files=$(find "$directory" -mindepth 1 -maxdepth 1 -type f -print)
+  files=$(find "$directory" -mindepth 1 -maxdepth 1 -type f -name '*.js' -print)
   [ -n "$files" ] || die "no migration files in $directory"
-  nested=$(find "$directory" -mindepth 2 -print -quit)
-  [ -z "$nested" ] || die "unexpected nested entry: $nested"
+  nested=$(find "$directory" -mindepth 2 -name '*.js' -print -quit)
+  [ -z "$nested" ] || die "migration files must not be nested: $nested"
   invalid=$(printf '%s\n' "$files" | while IFS= read -r file; do
     basename "$file" | grep -Eq '^[0-9]{14}_[a-z0-9][a-z0-9_-]*\.js$' || echo "$file"
   done)
@@ -49,9 +52,15 @@ sync() {
 
   mkdir "$work/extracted"
   tar -xzf "$archive" -C "$work/extracted"
-  source_dir=$(find "$work/extracted" -type d -path "*/pb_migrations" -print)
-  source_count=$(printf '%s\n' "$source_dir" | sed '/^$/d' | wc -l | tr -d ' ')
-  [ "$source_count" -eq 1 ] || die "expected one pb_migrations directory, found $source_count"
+  root_dirs=$(find "$work/extracted" -mindepth 1 -maxdepth 1 -type d -print)
+  root_count=$(printf '%s\n' "$root_dirs" | sed '/^$/d' | wc -l | tr -d ' ')
+  [ "$root_count" -eq 1 ] || die "expected one top-level directory in archive, found $root_count"
+  repo_root=$(printf '%s\n' "$root_dirs" | head -n1)
+  if [ -d "$repo_root/pb_migrations" ]; then
+    source_dir=$repo_root/pb_migrations
+  else
+    source_dir=$repo_root
+  fi
   validate_migrations "$source_dir"
 
   staged="$work/staged"

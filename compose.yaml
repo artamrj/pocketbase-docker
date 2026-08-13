@@ -5,27 +5,21 @@ services:
     restart: unless-stopped
     init: true
     ports:
-      - "8090:8090"
+      - 8090:8090
     environment:
-      POCKETBASE_DEBUG: "false"
+      POCKETBASE_DEBUG: "true"
       POCKETBASE_ENCRYPTION_KEY: ${PB_ENCRYPTION_KEY}
-      MIGRATIONS_REPOSITORY: ${MIGRATIONS_REPOSITORY:-artamrj/pocketbase-migration}
-      MIGRATIONS_BRANCH: ${MIGRATIONS_BRANCH:-main}
+      MIGRATIONS_REPOSITORY: ${MIGRATIONS_REPOSITORY}
+      MIGRATIONS_BRANCH: ${MIGRATIONS_BRANCH}
+      MIGRATIONS_TOKEN: ${MIGRATIONS_TOKEN}
     volumes:
       - ./data:/pocketbase/data
       - ./migrations:/pocketbase/migrations
-      - ./hooks:/pocketbase/hooks
-      - ./public:/pocketbase/public
-    secrets:
-      - github_token
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://127.0.0.1:8090/api/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 12
-      start_period: 10s
-    stop_grace_period: 20s
 
-secrets:
-  github_token:
-    file: ./secrets/github_token
+    # healthcheck:
+    #   test: ["CMD", "curl", "--fail", "http://127.0.0.1:8090/api/health"]
+    #   interval: 10s
+    #   timeout: 3s
+    #   retries: 12
+    #   start_period: 10s
+    # stop_grace_period: 20s
