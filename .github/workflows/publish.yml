@@ -46,13 +46,27 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out image source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Run worker unit tests
         run: tests/worker.sh
 
+      - name: Validate private migration configuration
+        env:
+          MIGRATIONS_REPO_TOKEN: ${{ secrets.MIGRATIONS_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$MIGRATIONS_REPO_TOKEN" ]]; then
+            echo "::error::Create the MIGRATIONS_REPO_TOKEN Actions secret with read-only Contents access to $MIGRATIONS_REPOSITORY."
+            exit 1
+          fi
+          if [[ -z "$MIGRATIONS_POLICY_BASE" ]]; then
+            echo "::error::Set the MIGRATIONS_POLICY_BASE repository variable to the full one-time migration reset commit."
+            exit 1
+          fi
+
       - name: Check out pinned migration source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.MIGRATIONS_REPOSITORY }}
           ref: ${{ inputs.migrations_ref || github.event.client_payload.migrations_ref || '' }}
