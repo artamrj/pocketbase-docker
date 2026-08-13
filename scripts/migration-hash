@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ] || [ ! -d "$1" ]; then
+  echo "usage: migration-hash DIRECTORY" >&2
+  exit 64
+fi
+
+directory=${1%/}
+unsupported=$(find "$directory" ! -type d ! -type f -print -quit)
+[ -z "$unsupported" ] || {
+  echo "migration directory contains a non-regular entry: $unsupported" >&2
+  exit 65
+}
+file_count=$(find "$directory" -type f -print | wc -l | tr -d ' ')
+if [ "$file_count" -eq 0 ]; then
+  echo "migration directory contains no files: $directory" >&2
+  exit 65
+fi
+
+# LC_ALL=C and NUL delimiters make this stable across hosts and unusual paths.
+LC_ALL=C find "$directory" -type f -print0 \
+  | LC_ALL=C sort -z \
+  | while IFS= read -r -d '' file; do
+      relative=${file#"$directory"/}
+      size=$(wc -c < "$file" | tr -d ' ')
+      printf '%s\0%s\0' "$relative" "$size"
+      dd if="$file" bs=65536 2>/dev/null
+      printf '\0'
+    done \
+  | sha256sum \
+  | cut -d ' ' -f 1

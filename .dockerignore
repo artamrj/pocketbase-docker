@@ -1,0 +1,4 @@
+**
+!.build/pocketbase
+!scripts/
+!scripts/**
