@@ -1,4 +1,4 @@
 **
 !.build/pocketbase
-!scripts/
-!scripts/**
+!pb_migrations/
+!pb_migrations/**
