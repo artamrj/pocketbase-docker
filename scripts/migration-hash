@@ -19,14 +19,22 @@ if [ "$file_count" -eq 0 ]; then
 fi
 
 # LC_ALL=C and NUL delimiters make this stable across hosts and unusual paths.
-LC_ALL=C find "$directory" -type f -print0 \
-  | LC_ALL=C sort -z \
-  | while IFS= read -r -d '' file; do
-      relative=${file#"$directory"/}
-      size=$(wc -c < "$file" | tr -d ' ')
-      printf '%s\0%s\0' "$relative" "$size"
-      dd if="$file" bs=65536 2>/dev/null
-      printf '\0'
-    done \
-  | sha256sum \
-  | cut -d ' ' -f 1
+# Separate stages ensure an upstream failure cannot be hidden by a later pipe.
+work=$(mktemp -d "${TMPDIR:-/tmp}/migration-hash.XXXXXXXX")
+trap 'rm -rf "$work"' EXIT HUP INT TERM
+LC_ALL=C find "$directory" -type f -print0 > "$work/paths"
+LC_ALL=C sort -z "$work/paths" > "$work/sorted"
+xargs -0 sh -c '
+      set -eu
+      directory=$1
+      shift
+      for file do
+        relative=${file#"$directory"/}
+        size=$(wc -c < "$file" | tr -d " ")
+        printf "%s\0%s\0" "$relative" "$size"
+        dd if="$file" bs=65536 2>/dev/null
+        printf "\0"
+      done
+    ' sh "$directory" < "$work/sorted" > "$work/stream"
+digest=$(sha256sum "$work/stream")
+printf '%s\n' "${digest%% *}"

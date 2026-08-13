@@ -122,8 +122,11 @@ gc_bundles() {
   require_embedded_values
   mkdir -p "$releases"
   active=$(active_hash 2>/dev/null || true)
-  find "$releases" -mindepth 1 -maxdepth 1 -type d -print0 \
-    | while IFS= read -r -d '' bundle; do
+  find "$releases" -mindepth 1 -maxdepth 1 -type d -exec sh -c '
+      set -eu
+      active=$1
+      shift
+      for bundle do
         hash=$(basename "$bundle")
         if [ "$hash" = "$active" ]; then
           continue
@@ -132,6 +135,7 @@ gc_bundles() {
         case "$hash" in *[!0-9a-f]*) continue ;; esac
         rm -rf -- "$bundle"
       done
+    ' sh "$active" {} +
 }
 
 case "${1:-}" in

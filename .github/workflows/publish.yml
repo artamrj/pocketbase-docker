@@ -63,7 +63,10 @@ jobs:
       - name: Enforce immutable migration history
         run: |
           set -euo pipefail
-          test -n "$MIGRATIONS_POLICY_BASE"
+          if [[ -z "$MIGRATIONS_POLICY_BASE" ]]; then
+            echo "::error::Set the MIGRATIONS_POLICY_BASE repository variable to the full one-time migration reset commit."
+            exit 1
+          fi
           scripts/check-migration-history migration-source "$MIGRATIONS_SUBDIR" "$MIGRATIONS_POLICY_BASE"
 
       - name: Resolve versions and migration identity
