@@ -7,7 +7,7 @@ LABEL org.opencontainers.image.title="PocketBase" \
       org.opencontainers.image.source="https://github.com/artamrj/pocketbase-docker" \
       org.opencontainers.image.version="${POCKETBASE_VERSION}"
 
-RUN apk add --no-cache ca-certificates curl tar
+RUN apk add --no-cache ca-certificates curl tar su-exec
 
 COPY --chmod=0755 .build/pocketbase /usr/local/bin/pocketbase
 COPY --chmod=0755 scripts/migration-worker /usr/local/bin/migration-worker
@@ -17,7 +17,9 @@ ENV POCKETBASE_DIR=/pocketbase/data \
     POCKETBASE_MIGRATIONS_DIR=/pocketbase/migrations \
     POCKETBASE_HOOKS_DIR=/pocketbase/hooks \
     POCKETBASE_PUBLIC_DIR=/pocketbase/public \
-    MIGRATIONS_TOKEN_FILE=/run/secrets/github_token
+    MIGRATIONS_TOKEN_FILE=/run/secrets/github_token \
+    PUID=1000 \
+    PGID=1000
 
 WORKDIR /pocketbase
 EXPOSE 8090

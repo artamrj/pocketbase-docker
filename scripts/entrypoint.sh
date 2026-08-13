@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 
+if [ "$(id -u)" -eq 0 ]; then
+  chown -R "${PUID:-1000}:${PGID:-1000}" /pocketbase
+  exec su-exec "${PUID:-1000}:${PGID:-1000}" "$0" "$@"
+fi
+
 case "${1:-}" in
   migration-worker)
     shift

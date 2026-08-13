@@ -46,6 +46,10 @@ The token needs fine-grained **read-only Contents** access to
 docker compose up -d
 ```
 
+On every start the entrypoint (running as root) chowns `/pocketbase` to
+`PUID:PGID` and then drops privileges with `su-exec`, so the mounted `./data`
+and `./migrations` directories never need manual permission fixes.
+
 ## Upgrade PocketBase
 
 ```sh
